@@ -1239,7 +1239,7 @@ async fn lifecycle_requests_reject_a_peer_reservation_without_acknowledging_it(
             "start" => start_session(State(state.clone()), Path(id.clone()), Ok(None))
                 .await
                 .into_response(),
-            "stop" => stop_session(State(state.clone()), Path(id.clone()))
+            "stop" => stop_session(State(state.clone()), Path(id.clone()), Ok(None))
                 .await
                 .into_response(),
             "archive" => update_session_archive(
@@ -1638,7 +1638,7 @@ async fn structured_stop_start_receipts_include_the_committed_peer_bundle() -> a
     })?;
     for stopped in [true, true, false, false] {
         let response = if stopped {
-            stop_session(State(state.clone()), Path(id.clone()))
+            stop_session(State(state.clone()), Path(id.clone()), Ok(None))
                 .await
                 .into_response()
         } else {
@@ -5650,7 +5650,9 @@ async fn worker_stopping_handlers_wait_for_an_in_flight_submission() {
         id: String,
     ) -> axum::response::Response {
         match which {
-            "stop" => stop_session(State(state), Path(id)).await.into_response(),
+            "stop" => stop_session(State(state), Path(id), Ok(None))
+                .await
+                .into_response(),
             "trash" => trash_session(State(state), Path(id), None)
                 .await
                 .into_response(),
@@ -5837,7 +5839,7 @@ async fn stop_session_notifies_plugins() {
     let state = crate::server::test_support::build_test_app_state(vec![inst]);
     let mut feed = PluginStatusFeed::attach(&state, "default").await;
 
-    stop_session(State(std::sync::Arc::clone(&state)), Path(id)).await;
+    stop_session(State(std::sync::Arc::clone(&state)), Path(id), Ok(None)).await;
 
     assert_eq!(feed.next().await, ("Running".into(), "Stopped".into()));
 }
@@ -5984,7 +5986,12 @@ async fn stop_session_clears_a_pending_plugin_revival() {
             .expect("load profiles")
             .metadata;
 
-    stop_session(State(std::sync::Arc::clone(&state)), Path(id.clone())).await;
+    stop_session(
+        State(std::sync::Arc::clone(&state)),
+        Path(id.clone()),
+        Ok(None),
+    )
+    .await;
 
     let instances = state.instances.read().await;
     let stopped = instances.iter().find(|i| i.id == id).unwrap();
@@ -5993,6 +6000,87 @@ async fn stop_session_clears_a_pending_plugin_revival() {
         !stopped.plugin_revival_pending,
         "a direct stop must release a stale pending mark"
     );
+}
+
+/// `if_highest_seq` stops only while the history has not moved past the caller's boundary.
+#[tokio::test]
+#[serial_test::serial]
+async fn stop_session_if_highest_seq_refuses_after_history_advanced() {
+    let _home = crate::session::test_support::isolate_app_dir();
+    let mut inst = make_test_instance();
+    inst.view = crate::session::View::Structured;
+    inst.source_profile = "stop-if".into();
+    let id = inst.id.clone();
+    let state = crate::server::test_support::build_test_app_state(vec![inst.clone()]);
+    let storage = Storage::new("stop-if", state.file_watch.clone()).expect("storage");
+    storage
+        .update(|rows, _| {
+            rows.push(inst);
+            Ok(())
+        })
+        .expect("seed the committed row");
+    *state.canonical_metadata.write().await =
+        crate::server::reload::load_all_profiles(&state.file_watch)
+            .expect("load profiles")
+            .metadata;
+    let prompt = crate::acp::Event::UserPromptSent {
+        text: "hello".into(),
+        attachments: Vec::new(),
+        prompt_id: None,
+        synthesized: false,
+        origin_plugin: None,
+    };
+    state.acp_event_store.record(&id, 1, &prompt).unwrap();
+    state.acp_event_store.record(&id, 2, &prompt).unwrap();
+    let stop = |boundary| {
+        stop_session(
+            State(state.clone()),
+            Path(id.clone()),
+            Ok(Some(Json(crate::daemon::StopSessionBody {
+                if_highest_seq: Some(boundary),
+            }))),
+        )
+    };
+
+    let refused = stop(1).await.into_response();
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(refused.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"],
+        "history_advanced"
+    );
+    let status = |state: &Arc<AppState>| {
+        let state = state.clone();
+        let id = id.clone();
+        async move {
+            state
+                .instances
+                .read()
+                .await
+                .iter()
+                .find(|row| row.id == id)
+                .unwrap()
+                .status
+        }
+    };
+    assert_ne!(
+        status(&state).await,
+        Status::Stopped,
+        "a refused stop changes nothing"
+    );
+
+    let accepted = stop(2).await.into_response();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(accepted.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["outcome"]["stopped_at_seq"],
+        2
+    );
+    assert_eq!(status(&state).await, Status::Stopped);
 }
 
 /// #3651: `prompt_submission` auto-vivifies a registry entry for whatever id it

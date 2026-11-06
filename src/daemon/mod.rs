@@ -44,11 +44,11 @@ pub use wire::{
     PromptAttachmentKind, PromptAttachmentRef, PurgeOutcome, QueuedPromptEntry, RenameOutcome,
     RenameProfileBody, RenameSessionBody, ReorderBody, ReorderOutcome, RepoBaseInput,
     RestartOutcome, RestartSessionBody, RestoreOutcome, SessionResponse, SessionsEnvelope,
-    SetWorktreeNameBody, StartSessionBody, StopAuxiliaryBody, TerminalSize, TerminalTarget,
-    TerminalTargetStatus, TrashOutcome, TrashRelocationOutcome, TrashSessionBody, Tristate,
-    UpdateArchiveBody, UpdateColorBody, UpdateDiffBaseBody, UpdateFavoriteBody, UpdateGroupBody,
-    UpdateNotificationsBody, UpdatePinBody, UpdateSnoozeBody, UpdateUnreadBody,
-    WorkspaceRepoSummary, WorktreeEditOutcome,
+    SetWorktreeNameBody, StartSessionBody, StopAuxiliaryBody, StopSessionBody, StopSessionOutcome,
+    TerminalSize, TerminalTarget, TerminalTargetStatus, TrashOutcome, TrashRelocationOutcome,
+    TrashSessionBody, Tristate, UpdateArchiveBody, UpdateColorBody, UpdateDiffBaseBody,
+    UpdateFavoriteBody, UpdateGroupBody, UpdateNotificationsBody, UpdatePinBody, UpdateSnoozeBody,
+    UpdateUnreadBody, WorkspaceRepoSummary, WorktreeEditOutcome,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);

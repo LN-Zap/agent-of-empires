@@ -379,6 +379,21 @@ pub struct StartSessionBody {
     pub size: Option<TerminalSize>,
 }
 
+/// Optional body of `POST /api/sessions/{id}/stop`.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopSessionBody {
+    /// Stop only while the session's highest history sequence still equals this boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub if_highest_seq: Option<u64>,
+}
+
+/// Echoed as the stop response's `outcome` when `if_highest_seq` was honoured.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StopSessionOutcome {
+    pub stopped_at_seq: u64,
+}
+
 /// Explicit relaunch; omitted launch settings preserve the authoritative values.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

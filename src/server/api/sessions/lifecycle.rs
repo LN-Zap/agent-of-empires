@@ -1766,9 +1766,17 @@ async fn stop_with_commit(
 }
 
 /// Stop resources while retaining the session record for resume.
+///
+/// With `if_highest_seq`, the stop is refused with `409 history_advanced` unless the
+/// session's highest history sequence still equals it. The check runs under the prompt
+/// submission guard, so no prompt can be admitted between the check and the stop.
 pub async fn stop_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    body: Result<
+        Option<Json<crate::daemon::StopSessionBody>>,
+        axum::extract::rejection::JsonRejection,
+    >,
 ) -> impl IntoResponse {
     if let Some(response) = cityhall_block_non_structured(&state, &id).await {
         return response;
@@ -1776,6 +1784,10 @@ pub async fn stop_session(
     if state.read_only {
         return crate::server::api::read_only_response();
     }
+    let body = match body {
+        Ok(body) => body.map(|Json(body)| body).unwrap_or_default(),
+        Err(error) => return error.into_response(),
+    };
     let namespace = state.profile_namespace.read().await;
     if *state.canonical_health.read().await != crate::daemon::RuntimeHealth::Healthy {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -1786,6 +1798,26 @@ pub async fn stop_session(
         .await
     else {
         return crate::server::api::session_not_found();
+    };
+    let outcome = match body.if_highest_seq {
+        Some(boundary) => match state.acp_event_store.highest_seq_checked(&id) {
+            Ok(highest) if highest == boundary => Some(crate::daemon::StopSessionOutcome {
+                stopped_at_seq: highest,
+            }),
+            Ok(_) => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "history_advanced",
+                    "Session history moved past the given sequence; nothing was stopped"
+                        .to_string(),
+                )
+            }
+            Err(error) => {
+                tracing::warn!(target: "http.api.sessions", session = %id, %error, "stop history read failed");
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        },
+        None => None,
     };
     let lock = state.instance_lock(&id).await;
     let guard = lock.lock().await;
@@ -1808,7 +1840,7 @@ pub async fn stop_session(
     drop(guard);
     drop(submission);
     drop(namespace);
-    crate::server::runtime::session_mutation_response(&state, &id, None::<()>).await
+    crate::server::runtime::session_mutation_response(&state, &id, outcome).await
 }
 
 /// Resume a stopped session; structured workers restart through reconciliation.

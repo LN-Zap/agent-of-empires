@@ -2830,6 +2830,7 @@ mod tests {
             let native = crate::server::api::stop_session(
                 axum::extract::State(state.clone()),
                 axum::extract::Path(row.id.clone()),
+                Ok(None),
             )
             .await
             .into_response();

@@ -835,6 +835,8 @@ invalidates the failure marker.
 
 `DELETE /api/sessions/:id/acp` is a durable user stop, not a daemon detach. It commits the native stopped/dormant generation before retiring the captured original worker and returns `204` only after retirement is proven. Generic `POST /api/sessions/:id/stop` uses the same structured-worker stop boundary.
 
+`POST /api/sessions/:id/stop` accepts an optional `{"if_highest_seq": N}`. Under the prompt-submission guard, it stops only while the session's highest history sequence still equals `N`: otherwise it returns `409 history_advanced` and changes nothing, so a caller that proved the session idle at `N` can never cut a later turn short. A honoured boundary is echoed as `outcome.stopped_at_seq`.
+
 Admitted stop work survives HTTP cancellation; its committed native fence survives daemon reconstruction. Automatic reconciliation does not resume a committed stop. A later explicit spawn, start, restart, backend/provider switch or accepted prompt proves original retirement before consuming only its observed stop generation and token; a newer stop wins. A `no_revive` prompt cannot clear the stop.
 
 If a write commits but canonical publication fails, the stop remains durable and the response reports an unconfirmed outcome. Unproven retirement remains pending rather than reporting success. Daemon detach, idle shutdown and internal provider teardown do not independently create user-stop intent. Reversible stop preserves native transcript history.
