@@ -1800,10 +1800,16 @@ pub async fn stop_session(
         return crate::server::api::session_not_found();
     };
     let outcome = match body.if_highest_seq {
+        // A seq allocated beyond the stored maximum is an admitted event whose write
+        // failed or is still in flight, so the history has moved even though storage has not.
         Some(boundary) => match state.acp_event_store.highest_seq_checked(&id) {
-            Ok(highest) if highest == boundary => Some(crate::daemon::StopSessionOutcome {
-                stopped_at_seq: highest,
-            }),
+            Ok(highest)
+                if highest == boundary && state.acp_supervisor.allocated_seq(&id) <= highest =>
+            {
+                Some(crate::daemon::StopSessionOutcome {
+                    stopped_at_seq: highest,
+                })
+            }
             Ok(_) => {
                 return api_error(
                     StatusCode::CONFLICT,

@@ -610,6 +610,14 @@ impl<S: BroadcastSink> Supervisor<S> {
         }
     }
 
+    /// The last seq allocated for `session_id`, whether or not its event reached the store.
+    pub(crate) fn allocated_seq(&self, session_id: &str) -> u64 {
+        lock_recover(&self.next_seqs)
+            .get(session_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// The running epoch, for a caller that must stop only that epoch.
     pub(crate) fn running_lease(&self, session_id: &str) -> Option<Lease> {
         lock_recover(&self.lifecycle)

@@ -6071,6 +6071,14 @@ async fn stop_session_if_highest_seq_refuses_after_history_advanced() {
         "a refused stop changes nothing"
     );
 
+    // A prompt admitted after the boundary whose event-store write failed leaves the
+    // allocated seq ahead of the stored one: the stop must still be refused.
+    state.acp_supervisor.hydrate_seqs([(id.clone(), 3)]);
+    let unstored = stop(2).await.into_response();
+    assert_eq!(unstored.status(), StatusCode::CONFLICT);
+    assert_ne!(status(&state).await, Status::Stopped);
+    state.acp_supervisor.hydrate_seqs([(id.clone(), 2)]);
+
     let accepted = stop(2).await.into_response();
     assert_eq!(accepted.status(), StatusCode::OK);
     let body = axum::body::to_bytes(accepted.into_body(), usize::MAX)
