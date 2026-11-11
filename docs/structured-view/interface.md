@@ -46,6 +46,7 @@ The view opens with the composer ready. The transcript stays scrollable from the
 | Any         | `Ctrl+C`        | Cancel the in-flight prompt |
 | Any         | `Ctrl+O`        | Open the session in the web dashboard |
 | Any         | `Ctrl+X`        | Clear every queued prompt |
+| Any         | `Ctrl+T`        | Stop the newest running subagent; the turn continues |
 
 Approval keys resolve only while the approval card has focus, so typing "always allow" into the composer can never approve a tool.
 
@@ -78,6 +79,8 @@ The paperclip is disabled with a tooltip when the agent accepts no attachments, 
 Attachments persist with the transcript and queue alongside the prompt text, so sending one mid-turn parks the whole message until the session resumes. A full page reload drops a queued row carrying an attachment (reattach and resend). Audio and embedded resources are stored and sent but render as a labelled chip.
 
 ### Queued prompts
+
+Queued prompts can drain between turns while background tasks or sub-agents continue running. A queued `/clear` waits for that background work to finish before resetting the conversation.
 
 The composer keeps messages the session cannot accept yet:
 
