@@ -168,8 +168,7 @@ impl EventStore {
                 "SELECT event_json FROM acp_events
                  WHERE session_id = ?1
                    AND seq > ?2
-                   AND (json_extract(event_json, '$.Stopped') IS NOT NULL
-                     OR json_extract(event_json, '$.AgentStartupError') IS NOT NULL)
+                   AND discriminant IN ('Stopped', 'AgentStartupError')
                  ORDER BY seq ASC
                  LIMIT 1",
                 params![session_id, prompt_seq],
@@ -199,6 +198,7 @@ impl EventStore {
             conn.query_row(
                 "SELECT MAX(seq) FROM acp_events
                  WHERE session_id = ?1
+                   AND discriminant = 'Stopped'
                    AND json_extract(event_json, '$.Stopped.reason') = 'rate_limited'",
                 params![session_id],
                 |row| row.get::<_, Option<i64>>(0),
