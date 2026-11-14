@@ -149,6 +149,20 @@ async fn admit(
     }
 }
 
+/// A refused admission ends the attempt without a spawn, so it is the only
+/// record of why a counted attempt did nothing. A concurrent shutdown or a
+/// pending teardown is routine; anything else is logged where it is seen.
+fn log_refused_admission(id: &str, what: &str, error: &SupervisorError) {
+    match error {
+        SupervisorError::SpawnCancelled(_) | SupervisorError::TeardownPending(_) => {
+            tracing::debug!(target: "acp.supervisor", session = %id, "{what} not admitted: {error}");
+        }
+        _ => {
+            tracing::warn!(target: "acp.supervisor", session = %id, "{what} not admitted: {error}");
+        }
+    }
+}
+
 pub(super) async fn resume_one(state: Arc<AppState>, target: ResumeTarget) -> ResumeOutcome {
     let id = target.id.clone();
     let in_flight_turn = target.in_flight_turn;
@@ -181,7 +195,7 @@ pub(super) async fn resume_one(state: Arc<AppState>, target: ResumeTarget) -> Re
             }
         }
         Err(error) => {
-            tracing::debug!(target: "acp.supervisor", session = %id, "resume not admitted: {error}");
+            log_refused_admission(&id, "resume", &error);
             // A durable stop fence is terminal; only a pending teardown clears.
             return match error {
                 SupervisorError::TeardownPending(_) => ResumeOutcome::Retry,
@@ -282,7 +296,7 @@ pub(super) async fn resume_one(state: Arc<AppState>, target: ResumeTarget) -> Re
                         }
                     }
                     Err(error) => {
-                        tracing::debug!(target: "acp.supervisor", session = %id, "fallback spawn not admitted: {error}");
+                        log_refused_admission(&id, "fallback spawn", &error);
                         return ResumeOutcome::SpawnFinished;
                     }
                 };
