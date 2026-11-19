@@ -3,8 +3,9 @@ description: >
   Wraps rustc with kache backed by the shared S3 bucket. main pushes write
   `artifacts/`; same-repo PRs read it and write `artifacts-pr/`; fork PRs get
   no OIDC token and build without a remote, as does every job while the
-  RUNS_ON_DISABLED killswitch is on. The calling job needs
-  `id-token: write`.
+  RUNS_ON_DISABLED killswitch is on. The calling job needs `id-token: write`.
+  A repository that cannot assume the role (a fork without access to the
+  bucket) builds without a remote instead of failing.
 
 inputs:
   manifest-key:
@@ -32,6 +33,9 @@ runs:
         fi
         echo "KACHE_PULL_REQUEST_PREFIX=artifacts-pr" >> "$GITHUB_ENV"
     - if: steps.role.outputs.role != ''
+      id: aws
+      # Only the cache is optional: build and test steps still fail the job.
+      continue-on-error: true
       uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
       with:
         role-to-assume: arn:aws:iam::745600963472:role/${{ steps.role.outputs.role }}
@@ -41,9 +45,9 @@ runs:
     - uses: kunobi-ninja/kache-action@ad7317540dcdd71c904f7a60a87b620a0c0e67ed # v1
       with:
         version: v2.0.0
-        s3-bucket: ${{ steps.role.outputs.role != '' && 'aoe-rust-kache' || '' }}
+        s3-bucket: ${{ steps.aws.outcome == 'success' && 'aoe-rust-kache' || '' }}
         s3-region: us-east-1
-        save-cache: ${{ steps.role.outputs.role != '' }}
+        save-cache: ${{ steps.aws.outcome == 'success' }}
         github-cache: "false"
         manifest-key: ${{ inputs.manifest-key }}
         pr-comment: "false"
