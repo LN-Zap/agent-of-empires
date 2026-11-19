@@ -5262,11 +5262,20 @@ mod tests {
         state.acp_event_store.record_at(id, 1, &prompt("go"), at).unwrap();
         state.acp_event_store.record_at(id, 2, &stopped("end_turn"), at).unwrap();
         // The listener keeps one fold per session, hydrated here at seq 2.
-        assert_eq!(state.session_service.fold_control_state(id).await.last_seq, 2);
+        assert_eq!(
+            state.session_service.fold_control_state(id).await.last_seq,
+            2
+        );
         // A newer event is recorded but has not been folded into that cache yet.
         state.acp_event_store.record_at(id, 3, &prompt("again"), at).unwrap();
-        assert_eq!(state.session_service.sidebar_status_at(id, 3).await, Some(Status::Running));
+        assert_eq!(
+            state.session_service.sidebar_status_at(id, 3).await,
+            Some(Status::Running)
+        );
         // At or behind the fold, the projection answers from the fold alone.
-        assert_eq!(state.session_service.sidebar_status_at(id, 2).await, Some(Status::Idle));
+        assert_eq!(
+            state.session_service.sidebar_status_at(id, 2).await,
+            Some(Status::Idle)
+        );
     }
 }
