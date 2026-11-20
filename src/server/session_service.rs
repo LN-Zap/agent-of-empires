@@ -1949,35 +1949,35 @@ impl SessionService {
     /// The sidebar status projected at `seq`, for a frame published while the
     /// control cache was cold or behind, so no status rode with it.
     ///
-    /// Starts from the shared control fold instead of replaying the session from
-    /// its first event. The cached fold already carries everything up to its last
-    /// seq, so only the events after it are folded here; a cold session hydrates
-    /// through [`Self::fold_control_state`] first, and that hydration is the only
-    /// path that reads the session's whole log. A frame at or behind the fold
-    /// answers from the fold, whose verdict is the newest one.
+    /// A frame at the fold's last seq answers from the fold. A frame ahead of it
+    /// folds only the events after the fold, and a cold session hydrates through
+    /// [`Self::fold_control_state`] first, so that hydration is the only path that
+    /// reads the session's whole log. A frame behind the fold is projected at its
+    /// own seq from the log, because reading the fold there would show a later
+    /// level and lose the transition the frame carries, such as running to idle.
     pub(crate) async fn sidebar_status_at(
         &self,
         id: &str,
         seq: u64,
     ) -> Option<crate::session::Status> {
+        use crate::acp::state::{AcpSessionId, AcpState, AgentName};
         let fold = self.fold_control_state(id).await;
-        if fold.last_seq >= seq {
-            // The fold is at or ahead of the frame: its verdict is the newest one,
-            // and there is nothing older to project.
-            tracing::debug!(
-                target: "acp.sidebar_projection",
-                session = %id,
-                fold_at = fold.last_seq,
-                seq,
-                folded = false,
-                "sidebar status came from a fold at or ahead of the frame"
-            );
+        if fold.last_seq == seq {
             return Some(fold.sidebar_status());
         }
         let store = Arc::clone(&self.acp_event_store);
         let sid = id.to_string();
         let since = fold.last_seq;
+        let behind = fold.last_seq > seq;
         tokio::task::spawn_blocking(move || {
+            if behind {
+                let session = AcpSessionId(sid.clone());
+                let mut state = AcpState::new(session, AgentName(String::new()), None);
+                for (at, event) in store.replay_before(&sid, seq.saturating_add(1)) {
+                    let _ = state.apply_event(at, event);
+                }
+                return Some(state.sidebar_status());
+            }
             let mut state = fold;
             let mut folded = 0usize;
             for (at, event) in store.replay_from(&sid, since) {
