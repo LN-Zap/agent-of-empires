@@ -1949,19 +1949,29 @@ impl SessionService {
     /// The sidebar status projected at `seq`, for a frame published while the
     /// control cache was cold or behind, so no status rode with it.
     ///
-    /// A frame at the fold's last seq answers from the fold. A frame ahead of it
-    /// folds only the events after the fold, and a cold session hydrates through
-    /// [`Self::fold_control_state`] first, so that hydration is the only path that
-    /// reads the session's whole log. A frame behind the fold is projected at its
-    /// own seq from the log, because reading the fold there would show a later
-    /// level and lose the transition the frame carries, such as running to idle.
+    /// Starts from the shared control fold instead of replaying the session from
+    /// its first event. The cached fold already carries everything up to its last
+    /// seq, so only the events after it are folded here; a cold session hydrates
+    /// through [`Self::fold_control_state`] first, and that hydration is the only
+    /// path that reads the session's whole log. A frame at or behind the fold
+    /// answers from the fold, whose verdict is the newest one.
     pub(crate) async fn sidebar_status_at(
         &self,
         id: &str,
         seq: u64,
     ) -> Option<crate::session::Status> {
         let fold = self.fold_control_state(id).await;
-        if fold.last_seq == seq {
+        if fold.last_seq >= seq {
+            // The fold is at or ahead of the frame: its verdict is the newest one,
+            // and there is nothing older to project.
+            tracing::debug!(
+                target: "acp.sidebar_projection",
+                session = %id,
+                fold_at = fold.last_seq,
+                seq,
+                folded = false,
+                "sidebar status came from a fold at or ahead of the frame"
+            );
             return Some(fold.sidebar_status());
         }
         let store = Arc::clone(&self.acp_event_store);
@@ -1978,6 +1988,14 @@ impl SessionService {
                     folded += 1;
                 }
             }
+            tracing::debug!(
+                target: "acp.sidebar_projection",
+                session = %sid,
+                since,
+                seq,
+                folded,
+                "projected sidebar status from the cached fold"
+            );
             Some(state.sidebar_status())
         })
         .await
@@ -5227,12 +5245,12 @@ mod tests {
             .unwrap_or_else(|_| panic!("{case}: the resume reached the container runtime"));
         }
     }
-    /// The listener projects a status for a frame published without one. A frame
-    /// ahead of the fold folds only what comes after it, a frame at the fold answers
-    /// from it, and a frame behind the fold keeps its own transition instead of
-    /// reading the later level the fold already holds.
+    /// The listener projects a status for a frame the cached fold has not seen.
+    /// That projection must fold only what comes after the fold, not the session
+    /// from its first event, and a frame at or behind the fold must not read the
+    /// log at all.
     #[tokio::test]
-    async fn sidebar_status_at_projects_the_tail_and_frames_behind_the_fold() {
+    async fn sidebar_status_at_folds_only_the_tail_of_the_log() {
         use crate::acp::state::test_support::{prompt, stopped};
         use crate::session::Status;
         let id = "sidebar-tail";
@@ -5248,19 +5266,12 @@ mod tests {
         // The listener keeps one fold per session, hydrated here at seq 2.
         let fold = service.fold_control_state(id).await;
         assert_eq!(fold.last_seq, 2);
-        // A frame at the fold answers from it.
-        let at_fold = service.sidebar_status_at(id, 2).await;
-        assert_eq!(at_fold, Some(Status::Idle));
-        // A frame ahead of the fold folds just the event it has not seen.
+        // A newer event is recorded but has not been folded into that cache yet.
         store.record_at(id, 3, &prompt("again"), at).unwrap();
-        let ahead = service.sidebar_status_at(id, 3).await;
-        assert_eq!(ahead, Some(Status::Running));
-        // Fold the newer event in, so the next projection finds the fold ahead of seq 2.
-        let _ = state.acp_control_cache.apply_if_cached(id, 3, &prompt("again"));
-        let folded = service.fold_control_state(id).await;
-        assert_eq!(folded.last_seq, 3);
-        // The earlier frame's own stop must still be its status, not the later prompt.
-        let behind = service.sidebar_status_at(id, 2).await;
-        assert_eq!(behind, Some(Status::Idle));
+        let projected = service.sidebar_status_at(id, 3).await;
+        assert_eq!(projected, Some(Status::Running));
+        // At or behind the fold, the projection answers from the fold alone.
+        let folded = service.sidebar_status_at(id, 2).await;
+        assert_eq!(folded, Some(Status::Idle));
     }
 }
