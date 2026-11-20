@@ -5272,15 +5272,24 @@ mod tests {
         let fold = service.fold_control_state(id).await;
         assert_eq!(fold.last_seq, 2);
         // A frame at the fold answers from it.
-        assert_eq!(service.sidebar_status_at(id, 2).await, Some(Status::Idle));
+        assert_eq!(
+            service.sidebar_status_at(id, 2).await,
+            Some(Status::Idle)
+        );
         // A frame ahead of the fold folds just the event it has not seen.
         store.record_at(id, 3, &prompt("again"), at).unwrap();
-        assert_eq!(service.sidebar_status_at(id, 3).await, Some(Status::Running));
+        assert_eq!(
+            service.sidebar_status_at(id, 3).await,
+            Some(Status::Running)
+        );
         // Fold the newer event in, so the next projection finds the fold ahead of seq 2.
         let _ = state.acp_control_cache.apply_if_cached(id, 3, &prompt("again"));
         assert_eq!(service.fold_control_state(id).await.last_seq, 3);
         // The earlier frame's own stop must still be its status, not the later prompt.
-        assert_eq!(service.sidebar_status_at(id, 2).await, Some(Status::Idle));
+        assert_eq!(
+            service.sidebar_status_at(id, 2).await,
+            Some(Status::Idle)
+        );
     }
 
     /// Drain the leading batch of a session's server-owned queue into the live
