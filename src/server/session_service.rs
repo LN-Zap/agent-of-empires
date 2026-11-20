@@ -1971,8 +1971,7 @@ impl SessionService {
         let behind = fold.last_seq > seq;
         tokio::task::spawn_blocking(move || {
             if behind {
-                let mut state =
-                    AcpState::new(AcpSessionId(sid.clone()), AgentName(String::new()), None);
+                let mut state = AcpState::new(AcpSessionId(sid.clone()), AgentName(String::new()), None);
                 for (at, event) in store.replay_before(&sid, seq.saturating_add(1)) {
                     let _ = state.apply_event(at, event);
                 }
