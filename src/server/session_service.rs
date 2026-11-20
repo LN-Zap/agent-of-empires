@@ -1960,7 +1960,6 @@ impl SessionService {
         id: &str,
         seq: u64,
     ) -> Option<crate::session::Status> {
-        use crate::acp::state::{AcpSessionId, AcpState, AgentName};
         let fold = self.fold_control_state(id).await;
         if fold.last_seq == seq {
             return Some(fold.sidebar_status());
@@ -1968,16 +1967,7 @@ impl SessionService {
         let store = Arc::clone(&self.acp_event_store);
         let sid = id.to_string();
         let since = fold.last_seq;
-        let behind = fold.last_seq > seq;
         tokio::task::spawn_blocking(move || {
-            if behind {
-                let session = AcpSessionId(sid.clone());
-                let mut state = AcpState::new(session, AgentName(String::new()), None);
-                for (at, event) in store.replay_before(&sid, seq.saturating_add(1)) {
-                    let _ = state.apply_event(at, event);
-                }
-                return Some(state.sidebar_status());
-            }
             let mut state = fold;
             let mut folded = 0usize;
             for (at, event) in store.replay_from(&sid, since) {
@@ -1988,14 +1978,6 @@ impl SessionService {
                     folded += 1;
                 }
             }
-            tracing::debug!(
-                target: "acp.sidebar_projection",
-                session = %sid,
-                since,
-                seq,
-                folded,
-                "projected sidebar status from the cached fold"
-            );
             Some(state.sidebar_status())
         })
         .await
